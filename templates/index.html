@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador de Datos CSV</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- PapaParse para procesamiento de CSV en el cliente -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+            margin-bottom: 30px;
+        }
+
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 20px;
+            background-color: #f8f9fa;
+            cursor: pointer;
+        }
+
+        .upload-area.highlight {
+            border-color: #6c757d;
+            background-color: #e9ecef;
+        }
+
+        .loading-spinner {
+            display: none;
+            margin: 20px auto;
+        }
+
+        .table-responsive {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Visualizador de Datos CSV</h1>
+        <h1 class="text-center mb-4">Nicolas Vargas Casas - Jaime Andres Salazar Rubiano</h1>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Cargar archivo CSV</h5>
+            </div>
+            <div class="card-body">
+                <div id="upload-area" class="upload-area">
+                    <p>Arrastra y suelta tu archivo CSV aquí o haz clic para seleccionarlo</p>
+                    <input type="file" id="file-input" accept=".csv" style="display: none;">
+                </div>
+                <div class="d-flex justify-content-center">
+                    <div id="loading-spinner" class="loading-spinner spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Cargando...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="results-section" style="display: none;">
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Información del Dataset</h5>
+                        </div>
+                        <div class="card-body">
+                            <p id="row-count"></p>
+                            <div id="column-info"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Estadísticas</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="stats-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Gráficos</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label for="chart-type">Tipo de Gráfico:</label>
+                                <select class="form-select" id="chart-type">
+                                    <option value="bar">Barras</option>
+                                    <option value="line">Líneas</option>
+                                    <option value="pie">Circular</option>
+                                    <option value="scatter">Dispersión</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label for="x-axis">Eje X:</label>
+                                <select class="form-select" id="x-axis"></select>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-group">
+                                <label for="y-axis">Eje Y:</label>
+                                <select class="form-select" id="y-axis"></select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="main-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Vista Previa de Datos</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-bordered" id="data-table">
+                            <thead id="table-header"></thead>
+                            <tbody id="table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // Variables globales
+            let currentData = null;
+            let chartInstance = null;
+
+            // Elementos DOM
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+            const loadingSpinner = document.getElementById('loading-spinner');
+            const resultsSection = document.getElementById('results-section');
+            const rowCount = document.getElementById('row-count');
+            const columnInfo = document.getElementById('column-info');
+            const statsContainer = document.getElementById('stats-container');
+            const chartType = document.getElementById('chart-type');
+            const xAxis = document.getElementById('x-axis');
+            const yAxis = document.getElementById('y-axis');
+            const mainChart = document.getElementById('main-chart');
+            const tableHeader = document.getElementById('table-header');
+            const tableBody = document.getElementById('table-body');
+
+            // Configuración del área de carga
+            uploadArea.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('highlight');
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('highlight');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('highlight');
+
+                if (e.dataTransfer.files.length) {
+                    handleFileUpload(e.dataTransfer.files[0]);
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length) {
+                    handleFileUpload(e.target.files[0]);
+                }
+            });
+
+            // Eventos para actualizar el gráfico
+            chartType.addEventListener('change', updateChart);
+            xAxis.addEventListener('change', updateChart);
+            yAxis.addEventListener('change', updateChart);
+
+            // Función para manejar la carga de archivos
+            function handleFileUpload(file) {
+                if (!file.name.endsWith('.csv')) {
+                    alert('Por favor, selecciona un archivo CSV válido.');
+                    return;
+                }
+
+                loadingSpinner.style.display = 'block';
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(data.error);
+                            return;
+                        }
+
+                        currentData = data;
+                        displayResults(data);
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Ocurrió un error al procesar el archivo. Por favor, inténtalo de nuevo.');
+                    })
+                    .finally(() => {
+                        loadingSpinner.style.display = 'none';
+                    });
+            }
+
+            // Función para mostrar los resultados
+            function displayResults(data) {
+                resultsSection.style.display = 'block';
+
+                // Información general
+                rowCount.textContent = `Número de filas: ${data.row_count}`;
+                columnInfo.innerHTML = `
+                    <p>Número de columnas: ${data.columns.length}</p>
+                    <p>Columnas: ${data.columns.join(', ')}</p>
+                    <p>Columnas numéricas: ${data.numeric_columns.join(', ') || 'Ninguna'}</p>
+                `;
+
+                // Estadísticas descriptivas
+                if (data.chart_data.stats) {
+                    let statsHTML = '<div class="table-responsive"><table class="table table-bordered table-sm">';
+                    statsHTML += '<thead><tr><th>Estadística</th>';
+
+                    for (const col of data.numeric_columns) {
+                        statsHTML += `<th>${col}</th>`;
+                    }
+
+                    statsHTML += '</tr></thead><tbody>';
+
+                    const statRows = ['count', 'mean', 'std', 'min', '25%', '50%', '75%', 'max'];
+
+                    for (const stat of statRows) {
+                        statsHTML += `<tr><td>${stat}</td>`;
+
+                        for (const col of data.numeric_columns) {
+                            const value = data.chart_data.stats[col][stat];
+                            const formattedValue = isNaN(value) ? value : Number(value).toFixed(2);
+                            statsHTML += `<td>${formattedValue}</td>`;
+                        }
+
+                        statsHTML += '</tr>';
+                    }
+
+                    statsHTML += '</tbody></table></div>';
+                    statsContainer.innerHTML = statsHTML;
+                } else {
+                    statsContainer.innerHTML = '<p>No hay columnas numéricas para calcular estadísticas.</p>';
+                }
+
+                // Llenar los selectores de ejes
+                populateAxisSelectors(data.columns, data.numeric_columns, data.categorical_columns);
+
+
+                // Mostrar tabla de datos
+                displayDataTable(data.table_data, data.columns);
+
+                // Inicializar el gráfico
+                updateChart();
+            }
+
+            // Función para llenar los selectores de ejes
+            function populateAxisSelectors(columns, numericColumns, categoricalColumns) {
+                xAxis.innerHTML = '';
+                yAxis.innerHTML = '';
+
+                const type = chartType.value;
+
+                // Eje X: si es gráfico de barras, líneas o pastel, usar categóricas; si es de dispersión, usar numéricas
+                let xCandidates = ['scatter'].includes(type) ? numericColumns : categoricalColumns.concat(numericColumns);
+                let yCandidates = ['pie'].includes(type) ? [] : numericColumns;
+
+                xCandidates.forEach(col => {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.textContent = col;
+                    xAxis.appendChild(option);
+                });
+
+                yCandidates.forEach(col => {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.textContent = col;
+                    yAxis.appendChild(option);
+                });
+
+                if (xCandidates.length) xAxis.value = xCandidates[0];
+                if (yCandidates.length) yAxis.value = yCandidates[0];
+            }
+
+
+            // Función para mostrar la tabla de datos
+            function displayDataTable(tableData, columns) {
+                // Crear encabezado de la tabla
+                let headerHTML = '<tr>';
+                columns.forEach(col => {
+                    headerHTML += `<th>${col}</th>`;
+                });
+                headerHTML += '</tr>';
+                tableHeader.innerHTML = headerHTML;
+
+                // Crear filas de datos
+                let bodyHTML = '';
+                tableData.forEach(row => {
+                    bodyHTML += '<tr>';
+                    columns.forEach(col => {
+                        bodyHTML += `<td>${row[col] !== null && row[col] !== undefined ? row[col] : ''}</td>`;
+                    });
+                    bodyHTML += '</tr>';
+                });
+                tableBody.innerHTML = bodyHTML;
+            }
+
+            // Función para actualizar el gráfico
+            function updateChart() {
+                if (!currentData || !currentData.table_data || currentData.table_data.length === 0) {
+                    return;
+                }
+
+                const type = chartType.value;
+                const xColumn = xAxis.value;
+                const yColumn = yAxis.value;
+
+                // Destruir el gráfico anterior si existe
+                if (chartInstance) {
+                    chartInstance.destroy();
+                }
+
+                // Preparar datos para el gráfico
+                const labels = currentData.table_data.slice(0, 20).map(row => row[xColumn]);
+                const data = currentData.table_data.slice(0, 20).map(row => row[yColumn]);
+
+                // Configurar colores
+                const backgroundColor = 'rgba(75, 192, 192, 0.2)';
+                const borderColor = 'rgba(75, 192, 192, 1)';
+
+                // Configuración específica según el tipo de gráfico
+                let chartConfig = {
+                    type: type,
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: `${yColumn} vs ${xColumn}`,
+                            data: data,
+                            backgroundColor: backgroundColor,
+                            borderColor: borderColor,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                };
+
+                // Ajustes específicos para gráficos de tipo pie
+                if (type === 'pie' || type === 'doughnut') {
+                    chartConfig.data.datasets[0].backgroundColor = labels.map((_, i) => {
+                        const hue = (i * 137) % 360;
+                        return `hsla(${hue}, 70%, 60%, 0.7)`;
+                    });
+
+                    chartConfig.options.scales = {};
+                }
+
+                // Crear el nuevo gráfico
+                chartInstance = new Chart(mainChart, chartConfig);
+            }
+        });
+    </script>
+</body>
+
+</html>
